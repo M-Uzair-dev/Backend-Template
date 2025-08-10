@@ -204,59 +204,139 @@ node app.js
 
 ## 🔗 Next.js Integration
 
-### 🛠️ Frontend Setup
+### 🛠️ Modern Frontend Setup with Zustand
 
 <details>
 <summary><strong>1️⃣ Install Required Packages</strong></summary>
 
 ```bash
 # In your Next.js project
-npm install axios js-cookie
-npm install -D @types/js-cookie  # If using TypeScript
+npm install axios zustand
+npm install -D @types/node  # If using TypeScript
 ```
+
+> **🔐 Note**: This backend uses **httpOnly cookies** for security, so no manual token storage needed!
 
 </details>
 
 <details>
-<summary><strong>2️⃣ Create API Service</strong></summary>
+<summary><strong>2️⃣ Create useApi Hook</strong></summary>
 
 ```javascript
-// lib/api.js
+// hooks/useApi.js
+import { useState, useCallback } from 'react';
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-
 const api = axios.create({
-  baseURL: API_URL,
-  withCredentials: true, // Important: Include cookies
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api',
+  withCredentials: true, // 🍪 Important: Includes httpOnly cookies automatically
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add auth token
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Response interceptor for error handling
+// Response interceptor for global error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
+      // Redirect to login on unauthorized
       window.location.href = '/login';
     }
     return Promise.reject(error);
   }
 );
+
+/**
+ * 🚀 Universal API Hook
+ * @param {string} route - API endpoint (e.g., '/auth/login')
+ * @param {Object} body - Request body for POST/PUT/PATCH
+ * @param {Function} onSuccess - Callback function on successful response
+ * @param {string} method - HTTP method (default: 'POST')
+ */
+export const useApi = (route, body = {}, onSuccess = () => {}, method = 'POST') => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+
+  const execute = useCallback(async (customBody = body) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      let response;
+      const config = { ...customBody };
+
+      switch (method.toUpperCase()) {
+        case 'GET':
+          response = await api.get(route);
+          break;
+        case 'POST':
+          response = await api.post(route, config);
+          break;
+        case 'PUT':
+          response = await api.put(route, config);
+          break;
+        case 'PATCH':
+          response = await api.patch(route, config);
+          break;
+        case 'DELETE':
+          response = await api.delete(route);
+          break;
+        default:
+          throw new Error(`Unsupported method: ${method}`);
+      }
+
+      setData(response.data);
+      onSuccess(response.data);
+      return { success: true, data: response.data };
+    } catch (err) {
+      const errorMessage = err.response?.data?.message || err.message || 'Something went wrong';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  }, [route, body, onSuccess, method]);
+
+  return {
+    execute,
+    loading,
+    error,
+    data,
+    // Utility methods for different HTTP methods
+    get: useCallback(() => execute(), [execute]),
+    post: useCallback((postBody = body) => execute(postBody), [execute, body]),
+    put: useCallback((putBody = body) => execute(putBody), [execute, body]),
+    patch: useCallback((patchBody = body) => execute(patchBody), [execute, body]),
+    delete: useCallback(() => execute(), [execute]),
+  };
+};
+
+// 🎯 Specialized hooks for common operations
+export const useLogin = (onSuccess = () => {}) => {
+  return useApi('/auth/login', {}, onSuccess, 'POST');
+};
+
+export const useSignup = (onSuccess = () => {}) => {
+  return useApi('/auth/signup', {}, onSuccess, 'POST');
+};
+
+export const useLogout = (onSuccess = () => {}) => {
+  return useApi('/auth/logout', {}, onSuccess, 'POST');
+};
+
+export const useForgotPassword = (onSuccess = () => {}) => {
+  return useApi('/auth/forgot-password', {}, onSuccess, 'POST');
+};
+
+export const useResetPassword = (token, onSuccess = () => {}) => {
+  return useApi(`/auth/reset-password/${token}`, {}, onSuccess, 'PATCH');
+};
+
+export const useProfile = (onSuccess = () => {}) => {
+  return useApi('/user/profile', {}, onSuccess, 'GET');
+};
 
 export default api;
 ```
@@ -264,156 +344,157 @@ export default api;
 </details>
 
 <details>
-<summary><strong>3️⃣ Authentication Context</strong></summary>
+<summary><strong>3️⃣ Zustand Auth Store</strong></summary>
 
 ```javascript
-// context/AuthContext.js
-import { createContext, useContext, useReducer, useEffect } from 'react';
-import api from '../lib/api';
+// store/authStore.js
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import api from '../hooks/useApi';
 
-const AuthContext = createContext();
+export const useAuthStore = create(
+  persist(
+    (set, get) => ({
+      // State
+      user: null,
+      isAuthenticated: false,
+      loading: false,
+      error: null,
 
-const initialState = {
-  user: null,
-  loading: true,
-  error: null,
-};
+      // Actions
+      setUser: (user) => set({ user, isAuthenticated: !!user, error: null }),
+      setLoading: (loading) => set({ loading }),
+      setError: (error) => set({ error }),
+      clearError: () => set({ error: null }),
 
-function authReducer(state, action) {
-  switch (action.type) {
-    case 'LOADING':
-      return { ...state, loading: true, error: null };
-    case 'LOGIN_SUCCESS':
-      return { ...state, user: action.payload, loading: false, error: null };
-    case 'LOGOUT':
-      return { ...state, user: null, loading: false, error: null };
-    case 'ERROR':
-      return { ...state, error: action.payload, loading: false };
-    default:
-      return state;
-  }
-}
+      // Auth Methods
+      login: async (email, password) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await api.post('/auth/login', { email, password });
+          const { user } = response.data;
+          set({ user, isAuthenticated: true, loading: false });
+          return { success: true };
+        } catch (error) {
+          const message = error.response?.data?.message || 'Login failed';
+          set({ error: message, loading: false });
+          return { success: false, error: message };
+        }
+      },
 
-export function AuthProvider({ children }) {
-  const [state, dispatch] = useReducer(authReducer, initialState);
+      signup: async (name, email, password) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await api.post('/auth/signup', { name, email, password });
+          const { user } = response.data;
+          set({ user, isAuthenticated: true, loading: false });
+          return { success: true };
+        } catch (error) {
+          const message = error.response?.data?.message || 'Signup failed';
+          set({ error: message, loading: false });
+          return { success: false, error: message };
+        }
+      },
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
+      logout: async () => {
+        set({ loading: true });
+        try {
+          await api.post('/auth/logout');
+          set({ user: null, isAuthenticated: false, loading: false });
+          return { success: true };
+        } catch (error) {
+          // Even if server logout fails, clear local state
+          set({ user: null, isAuthenticated: false, loading: false });
+          return { success: true };
+        }
+      },
 
-  const checkAuth = async () => {
-    try {
-      const response = await api.get('/user/profile');
-      dispatch({ type: 'LOGIN_SUCCESS', payload: response.data.user });
-    } catch (error) {
-      dispatch({ type: 'LOGOUT' });
+      checkAuth: async () => {
+        set({ loading: true });
+        try {
+          const response = await api.get('/user/profile');
+          const { user } = response.data;
+          set({ user, isAuthenticated: true, loading: false });
+          return true;
+        } catch (error) {
+          set({ user: null, isAuthenticated: false, loading: false });
+          return false;
+        }
+      },
+
+      forgotPassword: async (email) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await api.post('/auth/forgot-password', { email });
+          set({ loading: false });
+          return { success: true, message: response.data.message };
+        } catch (error) {
+          const message = error.response?.data?.message || 'Failed to send reset email';
+          set({ error: message, loading: false });
+          return { success: false, error: message };
+        }
+      },
+
+      resetPassword: async (token, password) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await api.patch(`/auth/reset-password/${token}`, { password });
+          const { user } = response.data;
+          set({ user, isAuthenticated: true, loading: false });
+          return { success: true };
+        } catch (error) {
+          const message = error.response?.data?.message || 'Password reset failed';
+          set({ error: message, loading: false });
+          return { success: false, error: message };
+        }
+      },
+
+      // Clear all auth data
+      clear: () => set({ 
+        user: null, 
+        isAuthenticated: false, 
+        loading: false, 
+        error: null 
+      }),
+    }),
+    {
+      name: 'auth-storage', // localStorage key
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
     }
-  };
-
-  const login = async (email, password) => {
-    try {
-      dispatch({ type: 'LOADING' });
-      const response = await api.post('/auth/login', { email, password });
-      
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-      }
-      
-      dispatch({ type: 'LOGIN_SUCCESS', payload: response.data.user });
-      return { success: true };
-    } catch (error) {
-      const message = error.response?.data?.message || 'Login failed';
-      dispatch({ type: 'ERROR', payload: message });
-      return { success: false, error: message };
-    }
-  };
-
-  const signup = async (name, email, password) => {
-    try {
-      dispatch({ type: 'LOADING' });
-      const response = await api.post('/auth/signup', { name, email, password });
-      
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-      }
-      
-      dispatch({ type: 'LOGIN_SUCCESS', payload: response.data.user });
-      return { success: true };
-    } catch (error) {
-      const message = error.response?.data?.message || 'Signup failed';
-      dispatch({ type: 'ERROR', payload: message });
-      return { success: false, error: message };
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await api.post('/auth/logout');
-      localStorage.removeItem('token');
-      dispatch({ type: 'LOGOUT' });
-    } catch (error) {
-      localStorage.removeItem('token');
-      dispatch({ type: 'LOGOUT' });
-    }
-  };
-
-  const forgotPassword = async (email) => {
-    try {
-      const response = await api.post('/auth/forgot-password', { email });
-      return { success: true, message: response.data.message };
-    } catch (error) {
-      const message = error.response?.data?.message || 'Failed to send reset email';
-      return { success: false, error: message };
-    }
-  };
-
-  const resetPassword = async (token, password) => {
-    try {
-      const response = await api.patch(`/auth/reset-password/${token}`, { password });
-      
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-      }
-      
-      dispatch({ type: 'LOGIN_SUCCESS', payload: response.data.user });
-      return { success: true };
-    } catch (error) {
-      const message = error.response?.data?.message || 'Password reset failed';
-      return { success: false, error: message };
-    }
-  };
-
-  const value = {
-    user: state.user,
-    loading: state.loading,
-    error: state.error,
-    login,
-    signup,
-    logout,
-    forgotPassword,
-    resetPassword,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+  )
+);
 ```
 
 </details>
 
 <details>
-<summary><strong>4️⃣ Wrap Your App</strong></summary>
+<summary><strong>4️⃣ App Setup with Auth Check</strong></summary>
 
 ```javascript
 // pages/_app.js or app/layout.js
-import { AuthProvider } from '../context/AuthContext';
+import { useEffect } from 'react';
+import { useAuthStore } from '../store/authStore';
+
+function AuthProvider({ children }) {
+  const checkAuth = useAuthStore((state) => state.checkAuth);
+  const setLoading = useAuthStore((state) => state.setLoading);
+
+  useEffect(() => {
+    // Check authentication on app start
+    const initAuth = async () => {
+      setLoading(true);
+      await checkAuth();
+      setLoading(false);
+    };
+    
+    initAuth();
+  }, [checkAuth, setLoading]);
+
+  return children;
+}
 
 export default function App({ Component, pageProps }) {
   return (
@@ -427,33 +508,39 @@ export default function App({ Component, pageProps }) {
 </details>
 
 <details>
-<summary><strong>5️⃣ Example Login Component</strong></summary>
+<summary><strong>5️⃣ Modern Login Component</strong></summary>
 
 ```javascript
 // components/LoginForm.js
 import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
 import { useRouter } from 'next/router';
+import { useLogin } from '../hooks/useApi';
+import { useAuthStore } from '../store/authStore';
 
 export default function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { login, loading, error } = useAuth();
   const router = useRouter();
+  
+  // 🎯 Using the auth store
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  // 🚀 Using the specialized useLogin hook
+  const { post: login, loading, error } = useLogin((data) => {
+    setUser(data.user);
+    router.push('/dashboard');
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const result = await login(email, password);
-    if (result.success) {
-      router.push('/dashboard');
-    }
+    await login({ email, password });
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto">
       <div>
-        <label htmlFor="email" className="block text-sm font-medium">
-          Email
+        <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+          Email Address
         </label>
         <input
           type="email"
@@ -461,12 +548,13 @@ export default function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+          placeholder="Enter your email"
         />
       </div>
       
       <div>
-        <label htmlFor="password" className="block text-sm font-medium">
+        <label htmlFor="password" className="block text-sm font-medium text-gray-700">
           Password
         </label>
         <input
@@ -475,20 +563,33 @@ export default function LoginForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
-          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+          placeholder="Enter your password"
         />
       </div>
 
       {error && (
-        <div className="text-red-600 text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+          {error}
+        </div>
       )}
 
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
+        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {loading ? 'Logging in...' : 'Login'}
+        {loading ? (
+          <>
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Logging in...
+          </>
+        ) : (
+          'Sign In'
+        )}
       </button>
     </form>
   );
@@ -498,40 +599,206 @@ export default function LoginForm() {
 </details>
 
 <details>
-<summary><strong>6️⃣ Protected Routes</strong></summary>
+<summary><strong>6️⃣ Protected Route Component</strong></summary>
 
 ```javascript
 // components/ProtectedRoute.js
-import { useAuth } from '../context/AuthContext';
-import { useRouter } from 'next/router';
 import { useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { useAuthStore } from '../store/authStore';
 
-export default function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth();
+export default function ProtectedRoute({ children, redirectTo = '/login' }) {
+  const { isAuthenticated, loading, checkAuth } = useAuthStore((state) => ({
+    isAuthenticated: state.isAuthenticated,
+    loading: state.loading,
+    checkAuth: state.checkAuth,
+  }));
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
+    // If not authenticated and not loading, check auth status
+    if (!isAuthenticated && !loading) {
+      checkAuth().then((isAuth) => {
+        if (!isAuth) {
+          router.push(redirectTo);
+        }
+      });
     }
-  }, [user, loading, router]);
+  }, [isAuthenticated, loading, checkAuth, router, redirectTo]);
 
+  // Show loading spinner while checking auth
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
-  if (!user) {
+  // If not authenticated, don't render children
+  if (!isAuthenticated) {
     return null;
   }
 
   return children;
+}
+
+// 🎯 Usage in pages
+export function withAuth(Component) {
+  return function AuthenticatedComponent(props) {
+    return (
+      <ProtectedRoute>
+        <Component {...props} />
+      </ProtectedRoute>
+    );
+  };
 }
 ```
 
 </details>
 
 <details>
-<summary><strong>7️⃣ Environment Configuration</strong></summary>
+<summary><strong>7️⃣ Advanced useApi Examples</strong></summary>
+
+```javascript
+// components/UserProfile.js
+import { useState, useEffect } from 'react';
+import { useApi } from '../hooks/useApi';
+import { useAuthStore } from '../store/authStore';
+
+export default function UserProfile() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+
+  // 🚀 GET user profile
+  const { 
+    get: getProfile, 
+    loading: profileLoading 
+  } = useApi('/user/profile', {}, (data) => {
+    setUser(data.user);
+    setName(data.user.name);
+    setEmail(data.user.email);
+  }, 'GET');
+
+  // 🚀 UPDATE user profile
+  const { 
+    put: updateProfile, 
+    loading: updateLoading 
+  } = useApi('/user/profile', {}, (data) => {
+    setUser(data.user);
+    alert('Profile updated successfully!');
+  }, 'PUT');
+
+  useEffect(() => {
+    if (user) {
+      setName(user.name);
+      setEmail(user.email);
+    } else {
+      getProfile();
+    }
+  }, [user, getProfile]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await updateProfile({ name, email });
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-8">
+      <h2 className="text-2xl font-bold mb-6">User Profile</h2>
+      
+      {profileLoading ? (
+        <div>Loading profile...</div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={updateLoading}
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {updateLoading ? 'Updating...' : 'Update Profile'}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// 🚀 Example: Custom API Hook Usage
+function TodoList() {
+  const [todos, setTodos] = useState([]);
+
+  // Custom API call with callback
+  const { post: addTodo, loading: addingTodo } = useApi('/todos', {}, (data) => {
+    setTodos(prev => [...prev, data.todo]);
+  });
+
+  const { get: fetchTodos, loading: fetchingTodos } = useApi('/todos', {}, (data) => {
+    setTodos(data.todos);
+  }, 'GET');
+
+  const handleAddTodo = async (title) => {
+    await addTodo({ title, completed: false });
+  };
+
+  useEffect(() => {
+    fetchTodos();
+  }, [fetchTodos]);
+
+  return (
+    <div>
+      {fetchingTodos ? (
+        <div>Loading todos...</div>
+      ) : (
+        <div>
+          {todos.map(todo => (
+            <div key={todo.id}>{todo.title}</div>
+          ))}
+          <button
+            onClick={() => handleAddTodo('New Todo')}
+            disabled={addingTodo}
+            className="bg-green-500 text-white px-4 py-2 rounded"
+          >
+            {addingTodo ? 'Adding...' : 'Add Todo'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+</details>
+
+<details>
+<summary><strong>8️⃣ Environment Configuration</strong></summary>
 
 ```bash
 # .env.local in your Next.js project
