@@ -204,7 +204,7 @@ node app.js
 
 ## 🔗 Next.js Integration
 
-### 🛠️ Modern Frontend Setup with Zustand
+### 🛠️ Easy Frontend Setup with Zustand
 
 <details>
 <summary><strong>1️⃣ Install Required Packages</strong></summary>
@@ -212,7 +212,6 @@ node app.js
 ```bash
 # In your Next.js project
 npm install axios zustand
-npm install -D @types/node  # If using TypeScript
 ```
 
 > **🔐 Note**: This backend uses **httpOnly cookies** for security, so no manual token storage needed!
@@ -220,7 +219,9 @@ npm install -D @types/node  # If using TypeScript
 </details>
 
 <details>
-<summary><strong>2️⃣ Create useApi Hook</strong></summary>
+<summary><strong>2️⃣ Create useApi Hook (Copy & Paste Ready)</strong></summary>
+
+Create `hooks/useApi.js` in your Next.js project:
 
 ```javascript
 // hooks/useApi.js
@@ -229,31 +230,24 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api',
-  withCredentials: true, // 🍪 Important: Includes httpOnly cookies automatically
+  withCredentials: true, // 🍪 Sends httpOnly cookies automatically
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Response interceptor for global error handling
+// Global error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Redirect to login on unauthorized
-      window.location.href = '/login';
+      window.location.href = '/login'; // Redirect to login on unauthorized
     }
     return Promise.reject(error);
   }
 );
 
-/**
- * 🚀 Universal API Hook
- * @param {string} route - API endpoint (e.g., '/auth/login')
- * @param {Object} body - Request body for POST/PUT/PATCH
- * @param {Function} onSuccess - Callback function on successful response
- * @param {string} method - HTTP method (default: 'POST')
- */
+// 🚀 Main API Hook
 export const useApi = (route, body = {}, onSuccess = () => {}, method = 'POST') => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -265,20 +259,18 @@ export const useApi = (route, body = {}, onSuccess = () => {}, method = 'POST') 
       setError(null);
 
       let response;
-      const config = { ...customBody };
-
       switch (method.toUpperCase()) {
         case 'GET':
           response = await api.get(route);
           break;
         case 'POST':
-          response = await api.post(route, config);
+          response = await api.post(route, customBody);
           break;
         case 'PUT':
-          response = await api.put(route, config);
+          response = await api.put(route, customBody);
           break;
         case 'PATCH':
-          response = await api.patch(route, config);
+          response = await api.patch(route, customBody);
           break;
         case 'DELETE':
           response = await api.delete(route);
@@ -291,7 +283,7 @@ export const useApi = (route, body = {}, onSuccess = () => {}, method = 'POST') 
       onSuccess(response.data);
       return { success: true, data: response.data };
     } catch (err) {
-      const errorMessage = err.response?.data?.message || err.message || 'Something went wrong';
+      const errorMessage = err.response?.data?.message || 'Something went wrong';
       setError(errorMessage);
       return { success: false, error: errorMessage };
     } finally {
@@ -304,38 +296,11 @@ export const useApi = (route, body = {}, onSuccess = () => {}, method = 'POST') 
     loading,
     error,
     data,
-    // Utility methods for different HTTP methods
-    get: useCallback(() => execute(), [execute]),
     post: useCallback((postBody = body) => execute(postBody), [execute, body]),
+    get: useCallback(() => execute(), [execute]),
     put: useCallback((putBody = body) => execute(putBody), [execute, body]),
     patch: useCallback((patchBody = body) => execute(patchBody), [execute, body]),
-    delete: useCallback(() => execute(), [execute]),
   };
-};
-
-// 🎯 Specialized hooks for common operations
-export const useLogin = (onSuccess = () => {}) => {
-  return useApi('/auth/login', {}, onSuccess, 'POST');
-};
-
-export const useSignup = (onSuccess = () => {}) => {
-  return useApi('/auth/signup', {}, onSuccess, 'POST');
-};
-
-export const useLogout = (onSuccess = () => {}) => {
-  return useApi('/auth/logout', {}, onSuccess, 'POST');
-};
-
-export const useForgotPassword = (onSuccess = () => {}) => {
-  return useApi('/auth/forgot-password', {}, onSuccess, 'POST');
-};
-
-export const useResetPassword = (token, onSuccess = () => {}) => {
-  return useApi(`/auth/reset-password/${token}`, {}, onSuccess, 'PATCH');
-};
-
-export const useProfile = (onSuccess = () => {}) => {
-  return useApi('/user/profile', {}, onSuccess, 'GET');
 };
 
 export default api;
@@ -344,7 +309,9 @@ export default api;
 </details>
 
 <details>
-<summary><strong>3️⃣ Zustand Auth Store</strong></summary>
+<summary><strong>3️⃣ Create State Store (Copy & Paste Ready)</strong></summary>
+
+Create `store/authStore.js` in your Next.js project:
 
 ```javascript
 // store/authStore.js
@@ -354,7 +321,7 @@ import api from '../hooks/useApi';
 
 export const useAuthStore = create(
   persist(
-    (set, get) => ({
+    (set) => ({
       // State
       user: null,
       isAuthenticated: false,
@@ -367,48 +334,7 @@ export const useAuthStore = create(
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
 
-      // Auth Methods
-      login: async (email, password) => {
-        set({ loading: true, error: null });
-        try {
-          const response = await api.post('/auth/login', { email, password });
-          const { user } = response.data;
-          set({ user, isAuthenticated: true, loading: false });
-          return { success: true };
-        } catch (error) {
-          const message = error.response?.data?.message || 'Login failed';
-          set({ error: message, loading: false });
-          return { success: false, error: message };
-        }
-      },
-
-      signup: async (name, email, password) => {
-        set({ loading: true, error: null });
-        try {
-          const response = await api.post('/auth/signup', { name, email, password });
-          const { user } = response.data;
-          set({ user, isAuthenticated: true, loading: false });
-          return { success: true };
-        } catch (error) {
-          const message = error.response?.data?.message || 'Signup failed';
-          set({ error: message, loading: false });
-          return { success: false, error: message };
-        }
-      },
-
-      logout: async () => {
-        set({ loading: true });
-        try {
-          await api.post('/auth/logout');
-          set({ user: null, isAuthenticated: false, loading: false });
-          return { success: true };
-        } catch (error) {
-          // Even if server logout fails, clear local state
-          set({ user: null, isAuthenticated: false, loading: false });
-          return { success: true };
-        }
-      },
-
+      // Check if user is logged in
       checkAuth: async () => {
         set({ loading: true });
         try {
@@ -422,34 +348,7 @@ export const useAuthStore = create(
         }
       },
 
-      forgotPassword: async (email) => {
-        set({ loading: true, error: null });
-        try {
-          const response = await api.post('/auth/forgot-password', { email });
-          set({ loading: false });
-          return { success: true, message: response.data.message };
-        } catch (error) {
-          const message = error.response?.data?.message || 'Failed to send reset email';
-          set({ error: message, loading: false });
-          return { success: false, error: message };
-        }
-      },
-
-      resetPassword: async (token, password) => {
-        set({ loading: true, error: null });
-        try {
-          const response = await api.patch(`/auth/reset-password/${token}`, { password });
-          const { user } = response.data;
-          set({ user, isAuthenticated: true, loading: false });
-          return { success: true };
-        } catch (error) {
-          const message = error.response?.data?.message || 'Password reset failed';
-          set({ error: message, loading: false });
-          return { success: false, error: message };
-        }
-      },
-
-      // Clear all auth data
+      // Clear all data
       clear: () => set({ 
         user: null, 
         isAuthenticated: false, 
@@ -458,7 +357,7 @@ export const useAuthStore = create(
       }),
     }),
     {
-      name: 'auth-storage', // localStorage key
+      name: 'auth-storage',
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,
@@ -471,27 +370,22 @@ export const useAuthStore = create(
 </details>
 
 <details>
-<summary><strong>4️⃣ App Setup with Auth Check</strong></summary>
+<summary><strong>4️⃣ Setup App with Auth Check (Copy & Paste Ready)</strong></summary>
+
+Update your `pages/_app.js`:
 
 ```javascript
-// pages/_app.js or app/layout.js
+// pages/_app.js
 import { useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 
 function AuthProvider({ children }) {
   const checkAuth = useAuthStore((state) => state.checkAuth);
-  const setLoading = useAuthStore((state) => state.setLoading);
 
   useEffect(() => {
-    // Check authentication on app start
-    const initAuth = async () => {
-      setLoading(true);
-      await checkAuth();
-      setLoading(false);
-    };
-    
-    initAuth();
-  }, [checkAuth, setLoading]);
+    // Check if user is logged in when app starts
+    checkAuth();
+  }, [checkAuth]);
 
   return children;
 }
@@ -505,30 +399,42 @@ export default function App({ Component, pageProps }) {
 }
 ```
 
+Create your `.env.local` file:
+
+```bash
+# .env.local
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+```
+
 </details>
 
+## 🚀 Step-by-Step Implementation Guide
+
+### 🔑 **Step 1: Login Functionality**
+
 <details>
-<summary><strong>5️⃣ Modern Login Component</strong></summary>
+<summary><strong>Complete Login Implementation</strong></summary>
+
+**1. Create Login Page (`pages/login.js`):**
 
 ```javascript
-// components/LoginForm.js
+// pages/login.js
 import { useState } from 'react';
 import { useRouter } from 'next/router';
-import { useLogin } from '../hooks/useApi';
+import { useApi } from '../hooks/useApi';
 import { useAuthStore } from '../store/authStore';
 
-export default function LoginForm() {
+export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const router = useRouter();
   
-  // 🎯 Using the auth store
   const setUser = useAuthStore((state) => state.setUser);
   
-  // 🚀 Using the specialized useLogin hook
-  const { post: login, loading, error } = useLogin((data) => {
-    setUser(data.user);
-    router.push('/dashboard');
+  // 🚀 Login API call with success callback
+  const { post: login, loading, error } = useApi('/auth/login', {}, (data) => {
+    setUser(data.user); // Save user to store
+    router.push('/dashboard'); // Redirect to dashboard
   });
 
   const handleSubmit = async (e) => {
@@ -537,69 +443,544 @@ export default function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto">
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-          Email Address
-        </label>
-        <input
-          type="email"
-          id="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-          placeholder="Enter your email"
-        />
-      </div>
-      
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-          Password
-        </label>
-        <input
-          type="password"
-          id="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-          placeholder="Enter your password"
-        />
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-          {error}
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">
+            Sign in to your account
+          </h2>
         </div>
-      )}
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="email" className="sr-only">Email address</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Email address"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="password" className="sr-only">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Password"
+            />
+          </div>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {loading ? (
-          <>
-            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Logging in...
-          </>
-        ) : (
-          'Sign In'
-        )}
-      </button>
-    </form>
+          {error && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              {loading ? 'Signing in...' : 'Sign in'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+**That's it! Your login is working. Test it by:**
+1. Going to `/login`
+2. Entering valid credentials  
+3. Getting redirected to `/dashboard`
+4. User data saved in Zustand store
+
+</details>
+
+### ✍️ **Step 2: Signup Functionality**
+
+<details>
+<summary><strong>Complete Signup Implementation</strong></summary>
+
+**1. Create Signup Page (`pages/signup.js`):**
+
+```javascript
+// pages/signup.js
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import { useApi } from '../hooks/useApi';
+import { useAuthStore } from '../store/authStore';
+
+export default function SignupPage() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const router = useRouter();
+  
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  // 🚀 Signup API call with success callback
+  const { post: signup, loading, error } = useApi('/auth/signup', {}, (data) => {
+    setUser(data.user); // Save user to store
+    router.push('/dashboard'); // Redirect to dashboard
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await signup({ name, email, password });
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">
+            Create your account
+          </h2>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="name" className="sr-only">Full name</label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Full name"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="email" className="sr-only">Email address</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Email address"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="password" className="sr-only">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Password (min 6 chars, uppercase, lowercase, number)"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              {loading ? 'Creating account...' : 'Sign up'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+**Test signup by:**
+1. Going to `/signup`
+2. Entering name, email, password (must have uppercase, lowercase, number)
+3. Getting automatically logged in and redirected
+
+</details>
+
+### 🚪 **Step 3: Logout Functionality**
+
+<details>
+<summary><strong>Complete Logout Implementation</strong></summary>
+
+**1. Create Logout Component (`components/LogoutButton.js`):**
+
+```javascript
+// components/LogoutButton.js
+import { useRouter } from 'next/router';
+import { useApi } from '../hooks/useApi';
+import { useAuthStore } from '../store/authStore';
+
+export default function LogoutButton({ className = "" }) {
+  const router = useRouter();
+  const { clear } = useAuthStore();
+  
+  // 🚀 Logout API call with success callback
+  const { post: logout, loading } = useApi('/auth/logout', {}, () => {
+    clear(); // Clear user from store
+    router.push('/login'); // Redirect to login
+  });
+
+  const handleLogout = async () => {
+    await logout(); // No body needed for logout
+  };
+
+  return (
+    <button
+      onClick={handleLogout}
+      disabled={loading}
+      className={`bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 ${className}`}
+    >
+      {loading ? 'Logging out...' : 'Logout'}
+    </button>
+  );
+}
+```
+
+**2. Use in any component:**
+
+```javascript
+// pages/dashboard.js
+import LogoutButton from '../components/LogoutButton';
+import { useAuthStore } from '../store/authStore';
+
+export default function Dashboard() {
+  const user = useAuthStore((state) => state.user);
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <h1 className="text-xl font-semibold">Dashboard</h1>
+            <LogoutButton />
+          </div>
+        </div>
+      </nav>
+      
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Welcome, {user?.name}!
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Email: {user?.email}
+          </p>
+        </div>
+      </main>
+    </div>
   );
 }
 ```
 
 </details>
 
+### 🔄 **Step 4: Forgot Password Functionality**
+
 <details>
-<summary><strong>6️⃣ Protected Route Component</strong></summary>
+<summary><strong>Complete Forgot Password Implementation</strong></summary>
+
+**1. Create Forgot Password Page (`pages/forgot-password.js`):**
+
+```javascript
+// pages/forgot-password.js
+import { useState } from 'react';
+import Link from 'next/link';
+import { useApi } from '../hooks/useApi';
+
+export default function ForgotPasswordPage() {
+  const [email, setEmail] = useState('');
+  const [success, setSuccess] = useState(false);
+  
+  // 🚀 Forgot password API call with success callback
+  const { post: forgotPassword, loading, error } = useApi('/auth/forgot-password', {}, () => {
+    setSuccess(true);
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await forgotPassword({ email });
+  };
+
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h2 className="text-3xl font-extrabold text-gray-900">Check your email</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              We've sent a password reset link to your email address.
+            </p>
+            <div className="mt-4">
+              <Link href="/login" className="text-indigo-600 hover:text-indigo-500">
+                Back to login
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">
+            Forgot your password?
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Enter your email address and we'll send you a link to reset your password.
+          </p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="email" className="sr-only">Email address</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Email address"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              {loading ? 'Sending...' : 'Send reset link'}
+            </button>
+          </div>
+
+          <div className="text-center">
+            <Link href="/login" className="text-indigo-600 hover:text-indigo-500">
+              Back to login
+            </Link>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+**2. Create Reset Password Page (`pages/reset-password.js`):**
+
+```javascript
+// pages/reset-password.js
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { useApi } from '../hooks/useApi';
+import { useAuthStore } from '../store/authStore';
+
+export default function ResetPasswordPage() {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [localError, setLocalError] = useState('');
+  const router = useRouter();
+  const { token } = router.query;
+  
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  // 🚀 Reset password API call with success callback
+  const { patch: resetPassword, loading, error } = useApi(
+    `/auth/reset-password/${token}`, 
+    {}, 
+    (data) => {
+      setUser(data.user); // Log user in automatically
+      router.push('/dashboard');
+    },
+    'PATCH'
+  );
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLocalError('');
+    
+    if (password !== confirmPassword) {
+      setLocalError('Passwords do not match');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setLocalError('Password must be at least 6 characters');
+      return;
+    }
+    
+    await resetPassword({ password });
+  };
+
+  if (!token) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900">Invalid reset link</h2>
+          <p className="mt-2 text-gray-600">This password reset link is invalid or expired.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">
+            Reset your password
+          </h2>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="password" className="sr-only">New Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="New password"
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="confirmPassword" className="sr-only">Confirm Password</label>
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Confirm new password"
+            />
+          </div>
+
+          {(error || localError) && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded">
+              {error || localError}
+            </div>
+          )}
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              {loading ? 'Resetting...' : 'Reset password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+</details>
+
+### 📦 **Step 5: Complete State Management**
+
+<details>
+<summary><strong>Using Zustand Store in Components</strong></summary>
+
+**1. Access user data anywhere:**
+
+```javascript
+// Any component
+import { useAuthStore } from '../store/authStore';
+
+function MyComponent() {
+  const user = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const loading = useAuthStore((state) => state.loading);
+  
+  if (loading) return <div>Loading...</div>;
+  if (!isAuthenticated) return <div>Please log in</div>;
+  
+  return (
+    <div>
+      <h1>Welcome {user.name}!</h1>
+      <p>Email: {user.email}</p>
+    </div>
+  );
+}
+```
+
+**2. Update user data:**
+
+```javascript
+// Update profile component
+import { useAuthStore } from '../store/authStore';
+import { useApi } from '../hooks/useApi';
+
+function UpdateProfile() {
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  const { put: updateProfile, loading } = useApi('/user/profile', {}, (data) => {
+    setUser(data.user); // Updates store automatically
+  }, 'PUT');
+  
+  const handleUpdate = async (newData) => {
+    await updateProfile(newData);
+  };
+  
+  // Component JSX here...
+}
+```
+
+</details>
+
+### 🔒 **Step 6: Protected Routes**
+
+<details>
+<summary><strong>Complete Protected Routes Implementation</strong></summary>
+
+**1. Create Protected Route Component (`components/ProtectedRoute.js`):**
 
 ```javascript
 // components/ProtectedRoute.js
@@ -607,43 +988,81 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 
-export default function ProtectedRoute({ children, redirectTo = '/login' }) {
-  const { isAuthenticated, loading, checkAuth } = useAuthStore((state) => ({
-    isAuthenticated: state.isAuthenticated,
-    loading: state.loading,
-    checkAuth: state.checkAuth,
-  }));
+export default function ProtectedRoute({ children }) {
+  const { user, isAuthenticated, loading, checkAuth } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
-    // If not authenticated and not loading, check auth status
-    if (!isAuthenticated && !loading) {
+    if (!loading && !isAuthenticated) {
       checkAuth().then((isAuth) => {
         if (!isAuth) {
-          router.push(redirectTo);
+          router.push('/login');
         }
       });
     }
-  }, [isAuthenticated, loading, checkAuth, router, redirectTo]);
+  }, [isAuthenticated, loading, checkAuth, router]);
 
-  // Show loading spinner while checking auth
+  // Show loading while checking authentication
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
-  // If not authenticated, don't render children
+  // Don't render anything if not authenticated
   if (!isAuthenticated) {
     return null;
   }
 
   return children;
 }
+```
 
-// 🎯 Usage in pages
+**2. Protect any page:**
+
+```javascript
+// pages/dashboard.js
+import ProtectedRoute from '../components/ProtectedRoute';
+import LogoutButton from '../components/LogoutButton';
+import { useAuthStore } from '../store/authStore';
+
+export default function Dashboard() {
+  const user = useAuthStore((state) => state.user);
+
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-100">
+        <nav className="bg-white shadow">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex justify-between items-center py-4">
+              <h1 className="text-xl font-semibold">Dashboard</h1>
+              <LogoutButton />
+            </div>
+          </div>
+        </nav>
+        
+        <main className="max-w-7xl mx-auto py-6 px-4">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Welcome back, {user?.name}!
+          </h2>
+          <p className="mt-2 text-gray-600">{user?.email}</p>
+          
+          {/* Your dashboard content here */}
+        </main>
+      </div>
+    </ProtectedRoute>
+  );
+}
+```
+
+**3. Or use HOC pattern:**
+
+```javascript
+// components/withAuth.js
+import ProtectedRoute from './ProtectedRoute';
+
 export function withAuth(Component) {
   return function AuthenticatedComponent(props) {
     return (
@@ -653,156 +1072,9 @@ export function withAuth(Component) {
     );
   };
 }
-```
 
-</details>
-
-<details>
-<summary><strong>7️⃣ Advanced useApi Examples</strong></summary>
-
-```javascript
-// components/UserProfile.js
-import { useState, useEffect } from 'react';
-import { useApi } from '../hooks/useApi';
-import { useAuthStore } from '../store/authStore';
-
-export default function UserProfile() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  
-  const user = useAuthStore((state) => state.user);
-  const setUser = useAuthStore((state) => state.setUser);
-
-  // 🚀 GET user profile
-  const { 
-    get: getProfile, 
-    loading: profileLoading 
-  } = useApi('/user/profile', {}, (data) => {
-    setUser(data.user);
-    setName(data.user.name);
-    setEmail(data.user.email);
-  }, 'GET');
-
-  // 🚀 UPDATE user profile
-  const { 
-    put: updateProfile, 
-    loading: updateLoading 
-  } = useApi('/user/profile', {}, (data) => {
-    setUser(data.user);
-    alert('Profile updated successfully!');
-  }, 'PUT');
-
-  useEffect(() => {
-    if (user) {
-      setName(user.name);
-      setEmail(user.email);
-    } else {
-      getProfile();
-    }
-  }, [user, getProfile]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    await updateProfile({ name, email });
-  };
-
-  return (
-    <div className="max-w-md mx-auto mt-8">
-      <h2 className="text-2xl font-bold mb-6">User Profile</h2>
-      
-      {profileLoading ? (
-        <div>Loading profile...</div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={updateLoading}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {updateLoading ? 'Updating...' : 'Update Profile'}
-          </button>
-        </form>
-      )}
-    </div>
-  );
-}
-
-// 🚀 Example: Custom API Hook Usage
-function TodoList() {
-  const [todos, setTodos] = useState([]);
-
-  // Custom API call with callback
-  const { post: addTodo, loading: addingTodo } = useApi('/todos', {}, (data) => {
-    setTodos(prev => [...prev, data.todo]);
-  });
-
-  const { get: fetchTodos, loading: fetchingTodos } = useApi('/todos', {}, (data) => {
-    setTodos(data.todos);
-  }, 'GET');
-
-  const handleAddTodo = async (title) => {
-    await addTodo({ title, completed: false });
-  };
-
-  useEffect(() => {
-    fetchTodos();
-  }, [fetchTodos]);
-
-  return (
-    <div>
-      {fetchingTodos ? (
-        <div>Loading todos...</div>
-      ) : (
-        <div>
-          {todos.map(todo => (
-            <div key={todo.id}>{todo.title}</div>
-          ))}
-          <button
-            onClick={() => handleAddTodo('New Todo')}
-            disabled={addingTodo}
-            className="bg-green-500 text-white px-4 py-2 rounded"
-          >
-            {addingTodo ? 'Adding...' : 'Add Todo'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-```
-
-</details>
-
-<details>
-<summary><strong>8️⃣ Environment Configuration</strong></summary>
-
-```bash
-# .env.local in your Next.js project
-NEXT_PUBLIC_API_URL=http://localhost:5000/api
+// Usage:
+// export default withAuth(Dashboard);
 ```
 
 </details>
